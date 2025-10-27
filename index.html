@@ -134,11 +134,41 @@ function resetRace(){
   drawFrame();
 }
 
+let randomFactors = {}; // 各選手の乱数特性
+
 function startRace(){
   resetRace();
   startBtn.style.display='none';
+  // 各選手の個別ランダム性を初期化
+  horses.forEach(h=>{
+    h.randomSeed = Math.random() * 1000;
+    h.randomBias = Math.random() * 2 - 1; // -1〜1
+    h.randomBoost = Math.random() * 3;    // 固有加速
+  });
   raceInterval = setInterval(raceFrame,40);
 }
+
+function speedPattern(h, progress){
+  // 毎フレーム完全独立乱数
+  const r = Math.random();
+  let base;
+  switch(h.type){
+    case 'start':  base = 2.8 - 1.8*progress; break;
+    case 'mid':    base = (progress<0.5)?1.5:3.3; break;
+    case 'end':    base = (progress>0.6)?3.8:1.2; break;
+    case 'fade':   base = 3.0 - 2.5*progress; break;
+    case 'random': base = 1.8 + Math.random()*2.2; break;
+  }
+
+  // 完全ランダムな波とノイズ
+  const noise = (Math.random() - 0.5) * 4;
+  const burst = (r < 0.03) ? (2 + Math.random()*4) : 0;
+
+  // 各レースごとに個体差を注入
+  if(!h.seed) h.seed = Math.random()*2 - 1;
+  return Math.max(0.5, base + noise + burst + h.seed);
+}
+
 
 // 改良版スピード関数（ゆらぎ＋ランダム性アップ）
 function speedPattern(h, progress){
@@ -148,13 +178,14 @@ function speedPattern(h, progress){
     case 'mid':    base = (progress<0.5)?1.5:3.2; break;
     case 'end':    base = (progress>0.6)?3.8:1.2; break;
     case 'fade':   base = 3.2 - 2.8*progress; break;
-    case 'random': base = 2.2; break;
+    case 'random': base = 2.2 + Math.random()*1.5; break;
   }
-  const wave = Math.sin(Date.now()/150 + Math.random()*3) * 1.2;
-  const noise = (Math.random() - 0.5) * 1.5;
-  const burst = Math.random() < 0.02 ? 4 : 0; // スパート
-  return Math.max(0.8, base + wave + noise + burst);
+  const wave = Math.sin(Math.random()*Math.PI*2) * 1.2; // 完全ランダム波
+  const noise = (Math.random() - 0.5) * 2.5;            // 強めのノイズ
+  const burst = Math.random() < 0.05 ? (2 + Math.random()*3) : 0; // 稀にスパート
+  return Math.max(0.5, base + wave + noise + burst);
 }
+
 
 function raceFrame(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
