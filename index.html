@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>内灘競輪</title>
+<style>
+  body{font-family: sans-serif; text-align:center; background:#fafafa}
+  canvas{border:1px solid #333; background:#fff; display:block; margin:12px auto}
+  .controls{width:90%; max-width:760px; margin:8px auto}
+  .player{margin:6px 0}
+  table{border-collapse:collapse; margin:12px auto}
+  td,th{border:1px solid #666; padding:6px 8px}
+</style>
+</head>
+<body>
+<h1>内灘競輪</h1>
+<div class="controls">
+  <label>プレイヤー数：</label>
+  <select id="playerCount"><option>1</option><option>2</option><option>3</option><option>4</option></select>
+  <button id="setupBtn">設定</button>
+</div>
+
+<div id="betArea" class="controls"></div>
+<canvas id="race" width="760" height="340"></canvas>
+<div class="controls">
+  <button id="startBtn" style="display:none">🏁 レース開始</button>
+  <button id="resetBtn">リセット</button>
+  <p id="result"></p>
+</div>
+
+<h3>脚質</h3>
+<table><tr><th>選手</th><th>脚質</th><th>特徴</th></tr>
+<tr><td style="color:red">長田</td><td>スタート型</td><td>序盤速いが後半失速</td></tr>
+<tr><td style="color:blue">上谷</td><td>中盤型</td><td>中盤で加速</td></tr>
+<tr><td style="color:green">長井</td><td>追い込み型</td><td>終盤に強い</td></tr>
+<tr><td style="color:orange">矢部</td><td>バテ型</td><td>最初速いがすぐ減速</td></tr>
+<tr><td style="color:purple">坂上</td><td>ランダム型</td><td>常に変動</td></tr>
+</table>
+
+<script>
+// ----- ランナー定義（画像設定） -----
+const horses = [
+  {name:"長田", type:"start", x:0, y:50, img:new Image()},
+  {name:"上谷", type:"mid", x:0, y:110, img:new Image()},
+  {name:"長井", type:"end", x:0, y:170, img:new Image()},
+  {name:"矢部", type:"fade", x:0, y:230, img:new Image()},
+  {name:"坂上", type:"random", x:0, y:290, img:new Image()}
+];
+
+// 画像パスを自由に変更
+horses[0].img.src = 'img/Screenshot 2025-10-27 09.58.20.png';
+horses[1].img.src = 'img/Screenshot 2025-10-27 10.09.57.png';
+horses[2].img.src = 'img/Screenshot 2025-10-27 09.58.07.png';
+horses[3].img.src = 'img/Screenshot 2025-10-27 09.58.15.png';
+horses[4].img.src = 'img/Screenshot 2025-10-27 09.57.47.png';
+
+let playerCount = 1;
+let bets = [];
+let raceInterval = null;
+let raceFinished = false;
+const canvas = document.getElementById('race');
+const ctx = canvas.getContext('2d');
+const betArea = document.getElementById('betArea');
+const setupBtn = document.getElementById('setupBtn');
+const startBtn = document.getElementById('startBtn');
+const resetBtn = document.getElementById('resetBtn');
+const resultP = document.getElementById('result');
+
+// ======================
+// プレイヤー設定
+// ======================
+function makeOptionsHTML(){
+  return horses.map(h=>`<option value="${h.name}">${h.name}</option>`).join('');
+}
+
+function setupPlayers(){
+  playerCount = parseInt(document.getElementById('playerCount').value);
+  betArea.innerHTML = '';
+  bets = [];
+  for(let i=0;i<playerCount;i++){
+    const div = document.createElement('div');
+    div.className = 'player';
+    div.innerHTML = `
+      <b>プレイヤー${i+1}</b> 予想（1→2→3位）：
+      <select id="p${i}_1">${makeOptionsHTML()}</select>
+      <select id="p${i}_2">${makeOptionsHTML()}</select>
+      <select id="p${i}_3">${makeOptionsHTML()}</select>
+      <button id="p${i}_ok">ベット</button>
+      <span id="p${i}_state" style="margin-left:8px;color:#666">未ベット</span>
+    `;
+    betArea.appendChild(div);
+    div.querySelector(`#p${i}_ok`).addEventListener('click', ()=>{
+      const b1 = div.querySelector(`#p${i}_1`).value;
+      const b2 = div.querySelector(`#p${i}_2`).value;
+      const b3 = div.querySelector(`#p${i}_3`).value;
+      bets[i] = [b1,b2,b3];
+      div.querySelector(`#p${i}_state`).textContent = `ベット済: ${b1}→${b2}→${b3}`;
+      checkAllBetsDone();
+    });
+  }
+}
+
+function checkAllBetsDone(){
+  if(bets.length>=playerCount && bets.slice(0,playerCount).every(b=>Array.isArray(b) && b.length===3)){
+    calcOdds();
+    startBtn.style.display='inline-block';
+  }
+}
+
+function calcOdds(){
+  const freq = {};
+  bets.slice(0,playerCount).forEach(b=>b.forEach(name=>freq[name]=(freq[name]||0)+1));
+  const totalBets = playerCount*3 || 1;
+  horses.forEach(h=>{
+    const p = freq[h.name] || 0.2;
+    let raw = (totalBets / p);
+    let odds = Math.max(1.2, Math.min(10, raw));
+    h.odds = Math.round(odds*10)/10;
+  });
+  let s = 'オッズ（人気が高いほど低倍率）:\n';
+  horses.forEach(h=> s += `${h.name}: ${h.odds}倍\n`);
+  alert(s);
+}
+
+// ======================
+// レース処理
+// ======================
+function resetRace(){
+  horses.forEach(h=>{h.x=0});
+  raceFinished=false;
+  clearInterval(raceInterval);
+  resultP.textContent='';
+  drawFrame();
+}
+
+function startRace(){
+  resetRace();
+  startBtn.style.display='none';
+  raceInterval = setInterval(raceFrame,40);
+}
+
+// 改良版スピード関数（ゆらぎ＋ランダム性アップ）
+function speedPattern(h, progress){
+  let base;
+  switch(h.type){
+    case 'start':  base = 3.0 - 1.5*progress; break;
+    case 'mid':    base = (progress<0.5)?1.5:3.2; break;
+    case 'end':    base = (progress>0.6)?3.8:1.2; break;
+    case 'fade':   base = 3.2 - 2.8*progress; break;
+    case 'random': base = 2.2; break;
+  }
+  const wave = Math.sin(Date.now()/150 + Math.random()*3) * 1.2;
+  const noise = (Math.random() - 0.5) * 1.5;
+  const burst = Math.random() < 0.02 ? 4 : 0; // スパート
+  return Math.max(0.8, base + wave + noise + burst);
+}
+
+function raceFrame(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  let allFinished = true;
+  const finishX = canvas.width - 80;
+  horses.forEach(h=>{
+    if(h.x < finishX){
+      const progress = h.x / finishX;
+      h.x += speedPattern(h, progress);
+      allFinished = false;
+    }
+    ctx.drawImage(h.img, h.x+10, h.y-18, 56, 36);
+    ctx.fillStyle='#222';
+    ctx.font='12px sans-serif';
+    ctx.fillText(`${h.name} ${h.odds?('('+h.odds+'倍)'):''}`, Math.max(4,h.x+4), h.y+30);
+  });
+  if(allFinished && !raceFinished){
+    raceFinished = true;
+    clearInterval(raceInterval);
+    announceResults();
+  }
+}
+
+function drawFrame(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  horses.forEach(h=>{
+    ctx.drawImage(h.img, h.x+10, h.y-18, 56, 36);
+    ctx.fillStyle='#222';
+    ctx.font='12px sans-serif';
+    ctx.fillText(`${h.name} ${h.odds?('('+h.odds+'倍)'):''}`, Math.max(4,h.x+4), h.y+30);
+  });
+}
+
+// ======================
+// 結果表示
+// ======================
+function announceResults(){
+  const order = [...horses].sort((a,b)=>b.x-a.x).map(h=>h.name);
+  let res = `🏆 結果: ${order.join(' → ')}\n`;
+  bets.slice(0,playerCount).forEach((b,i)=>{
+    const hit = (b[0]==order[0] && b[1]==order[1] && b[2]==order[2]);
+    if(hit){
+      const o1 = horses.find(h=>h.name==order[0]).odds || 1;
+      const o2 = horses.find(h=>h.name==order[1]).odds || 1;
+      const o3 = horses.find(h=>h.name==order[2]).odds || 1;
+      const payoff = Math.round((o1*o2*o3)*10)/10;
+      res += `🎉 プレイヤー${i+1} 的中！ 配当目安: ${payoff}倍\n`;
+    }else{
+      res += `💸 プレイヤー${i+1} はハズレ\n`;
+    }
+  });
+  resultP.textContent = res;
+}
+
+// ======================
+setupBtn.addEventListener('click', ()=>{ setupPlayers(); drawFrame(); });
+startBtn.addEventListener('click', ()=> startRace());
+resetBtn.addEventListener('click', ()=>{ bets=[]; startBtn.style.display='none'; setupPlayers(); resetRace(); });
+
+setupPlayers(); drawFrame();
+</script>
+</body>
+</html>
